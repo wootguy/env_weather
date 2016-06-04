@@ -1,0 +1,32 @@
+@PointClass size(-8 -8 -8, 8 8 8 ) color(128 255 255) = env_weather1 : "Weather effects"
+[
+	spawnflags(Flags) =
+	[
+		1 : "Start On" : 0
+		2 : "Constant Trigger" : 0 // otherwise, fire on enter/exit
+	]
+	
+	targetname(target_source) : "Name"
+	body(choices) : "Weather Mode" : 1 =
+	[
+		1 : "Rain"
+		2 : "Snow"
+	]
+	skin(integer) : "Intensity (1 - 16)" : 8
+	renderamt(string) : "Radius" : "1280"
+	scale(string) : "Speed Multiplier" : "1.0"
+	rendercolor(string) : "Direction" : "0 0 -1"
+	noise3(string) : "Particle Sprite" : ""
+	
+	vuser1(color255) : "Exposed Fog Color" : "202 202 202"
+	rendermode(integer) : "Exposed Fog Start Distance" : 0
+	renderfx(integer) : "Exposed Fog End Distance" : 1280
+	
+	vuser2(color255) : "Unexposed Fog Color" : "202 202 202"
+	iuser1(integer) : "Unexposed Fog Start Distance" : 0
+	iuser2(integer) : "Unexposed Fog End Distance" : 1280
+	
+	noise1(string) : "Exposed Trigger Target" : ""
+	noise2(string) : "Unexposed Trigger Target" : ""
+	fuser1(string) : "Constant Trigger Frequency" : ""	
+]
