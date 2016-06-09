@@ -7,26 +7,47 @@
 	]
 	
 	targetname(target_source) : "Name"
-	body(choices) : "Weather Mode" : 1 =
+	weather_type(choices) : "Weather Mode" : 1 =
 	[
 		1 : "Rain"
 		2 : "Snow"
 	]
-	skin(integer) : "Intensity (1 - 16)" : 8
-	renderamt(string) : "Radius" : "1280"
-	scale(string) : "Speed Multiplier" : "1.0"
-	rendercolor(string) : "Direction" : "0 0 -1"
-	noise3(string) : "Particle Sprite" : ""
+	intensity(integer) : "Intensity (1 - 16)" : 8
+	radius(string) : "Radius" : "1280"
+	speed_mult(string) : "Speed Multiplier" : "1.0"
+	angles(string) : "Pitch Yaw Roll (X Y Z)" : "90 0 0"
+	particle_spr(string) : "Particle Sprite" : "sprites/mommaspit.spr"
 	
-	vuser1(color255) : "Exposed Fog Color" : "202 202 202"
-	rendermode(integer) : "Exposed Fog Start Distance" : 0
-	renderfx(integer) : "Exposed Fog End Distance" : 1280
+	fog_color(color255) : "Fog Color" : "202 202 202"
+	fog_start(integer) : "Fog Start Distance" : 0
+	fog_end(integer) : "Fog End Distance" : 1280
 	
-	vuser2(color255) : "Unexposed Fog Color" : "202 202 202"
-	iuser1(integer) : "Unexposed Fog Start Distance" : 0
-	iuser2(integer) : "Unexposed Fog End Distance" : 1280
+	exposed_trig(string) : "Exposed Trigger Target" : ""
+	unexposed_trig(string) : "Unexposed Trigger Target" : ""
+	trig_freq(string) : "Constant Trigger Frequency" : ""	
+]
+
+
+@SolidClass = func_fog : "Positional fog"
+[
+	spawnflags(flags) =
+	[
+		1 : "Start On" : 0
+	]
 	
-	noise1(string) : "Exposed Trigger Target" : ""
-	noise2(string) : "Unexposed Trigger Target" : ""
-	fuser1(string) : "Constant Trigger Frequency" : ""	
+	targetname(target_source) : "Name"
+	fog_color(color255) : "Fog Color (RGB)" : "200 200 200"
+	fog_start(integer) : "Start Distance" : 0
+	fog_end(integer) : "End Distance" : 1280
+	time(string) : "Transition Time (Seconds)" : "0"
+]
+
+@SolidClass = func_fog_mask : "Masks brushes that show through fog"
+[
+	spawnflags(flags) =
+	[
+		1 : "Start On" : 0
+	]
+	
+	targetname(target_source) : "Name"
 ]

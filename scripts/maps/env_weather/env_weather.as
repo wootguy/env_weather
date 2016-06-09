@@ -2,20 +2,123 @@ class PlayerState
 {
 	EHandle plr;
 	bool exposed = false;
-	float fogProgress = 0;
+	
+	FogSettings currentFog;
+	FogSettings targetFog;
+	
+	float fogInterp = 0;
+	bool transitionFinished = false;
+	int fogInterpMode = EASE_OUT;
+	
+	float lastFogTouch = -1;
+	int lastFogTouchId = 0;
+	
+	int particleCounter = 0;
+	
+	FogSettings getInterpolatedFog()
+	{
+		FogSettings ret;
+		
+		float p = fogInterp;
+		float z = p;
+		float q = 1.0f - p;
+		
+		switch(fogInterpMode)
+		{
+			case EASE_IN:          p = p*p*p;                     break;
+			case EASE_OUT:         p = 1.0f - q*q*q;              break;
+		}
+		
+		
+		{	// color interp
+			Color A = currentFog.color;
+			Color B = targetFog.color;
+			int dr = int( float( int(B.r) - int(A.r) )*p + 0.5 );
+			int dg = int( float( int(B.g) - int(A.g) )*p + 0.5 );
+			int db = int( float( int(B.b) - int(A.b) )*p + 0.5 );
+			int da = int( float( int(B.a) - int(A.a) )*p + 0.5 );
+			ret.color = Color(A.r + dr, A.g + dg, A.b + db, A.a + da);
+		}
+		
+		{	// start interp
+			int a = currentFog.start;
+			int b = targetFog.start;
+			int d = int( int(b - a)*p + 0.5 );
+			ret.start = a + d;
+		}
+		
+		{	// end interp
+			if (fogInterpMode == EASE_IN)
+				p = z;
+			int a = currentFog.end;
+			int b = targetFog.end;
+			int d = int( int(b - a)*p + 0.5 );
+			ret.end = a + d;
+		}
+		
+		return ret;
+	}
+	
+	void setNewFogTarget(FogSettings fog)
+	{
+		currentFog = getInterpolatedFog();
+		fogInterp = 0;
+		transitionFinished = false;
+		
+		targetFog.color = fog.color;
+		targetFog.start = fog.start;
+		targetFog.end = fog.end;
+	}
+	
+	void setDefaultFogTarget()
+	{
+		FogSettings fog = default_fog;
+		fogInterpMode = EASE_OUT;
+		if (no_default_fog)
+		{
+			fog = getInterpolatedFog();
+			fog.end = 32767;
+			fog.start = 32766;
+			fogInterpMode = EASE_IN;
+		}
+		
+		transitionFinished = false;
+		setNewFogTarget(fog);
+		
+		if (lastFogTouch < 0)
+			fogInterp = 1.0f;
+			
+		lastFogTouch = 0;
+		lastFogTouchId = 0;
+	}
+}
+
+class FogSettings
+{
+	Color color;
+	int start = 0;
+	int end = 65535;
+}
+
+enum fog_interps
+{
+	EASE_IN,
+	EASE_OUT
 }
 
 // persistent-ish player data, organized by steam-id or username if on a LAN server, values are @PlayerState
 dictionary player_states;
 bool debug_mode = false;
-int effectCounter = 0;
 
-string effect_sprite = "sprites/mommaspit.spr";
-
+FogSettings default_fog;
+bool no_default_fog = true;
 
 // Will create a new state if the requested one does not exit
 PlayerState@ getPlayerState(CBasePlayer@ plr)
 {
+	if (plr is null)
+		return null;
+		
 	string steamId = g_EngineFuncs.GetPlayerAuthId( plr.edict() );
 	if (steamId == 'STEAM_ID_LAN' or steamId == 'BOT') {
 		steamId = plr.pev.netname;
@@ -27,44 +130,48 @@ PlayerState@ getPlayerState(CBasePlayer@ plr)
 		state.plr = plr;
 		player_states[steamId] = state;
 		println("ADDED STATE FOR: " + steamId);
+		g_Scheduler.SetTimeout("initFog", 0.5, steamId);
 	}
 	return cast<PlayerState@>( player_states[steamId] );
 }
 
+void initFog(string key)
+{	
+	PlayerState@ state = cast<PlayerState@>( player_states[key] );
+	if (state is null)
+		println("OH NOOO");
+		
+	state.transitionFinished = false;
+	state.fogInterp = 1;
+	println("WHY NO WORK");
+}
+
 void MapInit()
 {	
+	player_states.deleteAll();
 	g_CustomEntityFuncs.RegisterCustomEntity( "env_weather", "env_weather1" );
-	g_Game.PrecacheModel(effect_sprite);
+	g_CustomEntityFuncs.RegisterCustomEntity( "func_fog", "func_fog" );
 }
 
 void MapActivate()
 {
 	g_Scheduler.SetTimeout("populatePlayerStates", 2);
-	g_Scheduler.SetTimeout("testSomething", 2);
+	g_Scheduler.SetInterval("fogThink", 0.05);
+	scanForFogFadeEnts();
 }
 
-// 
-// 2, 20, 21, 23
-// color: 17, 18, 19
-
-
-
-void testSomething()
-{
-	
-	
-	g_Scheduler.SetTimeout("testSomething", 0.5);
-}
-
-void populatePlayerStates()
+array<EHandle> fogFadeEnts;
+void scanForFogFadeEnts()
 {	
+	fogFadeEnts.resize(0);
 	CBaseEntity@ ent = null;
 	do {
-		@ent = g_EntityFuncs.FindEntityByClassname(ent, "player"); 
-		if (ent !is null)
+		@ent = g_EntityFuncs.FindEntityByClassname(ent, "*"); 
+		if (ent !is null and ent.pev.rendermode == 123)
 		{
-			CBasePlayer@ plr = cast<CBasePlayer@>(ent);
-			getPlayerState(plr);
+			EHandle h_ent = ent;
+			ent.pev.rendermode = 2;
+			fogFadeEnts.insertLast(h_ent);
 		}
 	} while (ent !is null);
 }
@@ -74,6 +181,11 @@ HookReturnCode ClientJoin(CBasePlayer@ plr)
 	println("" + plr.pev.netname + " LE JOINED");
 	getPlayerState(plr);
 	return HOOK_CONTINUE;
+}
+
+void test(CBaseEntity@ ent)
+{
+	println("WOW" + ent.pev.classname);
 }
 
 HookReturnCode ClientLeave(CBasePlayer@ leaver)
@@ -99,55 +211,149 @@ HookReturnCode ClientLeave(CBasePlayer@ leaver)
 	return HOOK_CONTINUE;
 }
 
-void impactSnow(CBaseEntity@ plr, Vector pos, int lifeTime, string spr)
+void populatePlayerStates()
 {
+	CBaseEntity@ ent = null;
+	do {
+		@ent = g_EntityFuncs.FindEntityByClassname(ent, "player"); 
+		if (ent !is null)
+		{
+			CBasePlayer@ plr = cast<CBasePlayer@>(ent);
+			getPlayerState(plr);
+		}
+	} while (ent !is null);
+}
+
+void fogThink()
+{
+	array<string>@ stateKeys = player_states.getKeys();
+	for (uint i = 0; i < stateKeys.length(); i++)
+	{
+		PlayerState@ state = cast<PlayerState@>( player_states[stateKeys[i]] );
+		CBaseEntity@ plr = state.plr;
+		
+		if (!state.transitionFinished)
+		{
+			FogSettings fog = state.getInterpolatedFog();
+			bool enabled = true;
+			
+			if (state.fogInterp < 1.0f)
+				state.fogInterp += 0.05f;
+			if (state.fogInterp >= 1.0f)
+			{
+				if (state.lastFogTouchId == 0 and no_default_fog)
+					enabled = false;
+				state.transitionFinished = true;
+				state.fogInterp = 1.0f;
+				fog = state.targetFog;
+			}
+
+			println("SEND FOG TO: " + plr.pev.netname);
+			net_fog(fog.color, fog.start, fog.end, enabled, MSG_ONE_UNRELIABLE, plr.edict());
+		}
+		
+		if (state.lastFogTouch < 0 or (state.lastFogTouch > 0 and (g_Engine.time - state.lastFogTouch) > 0.1f))
+		{
+			state.setDefaultFogTarget();
+		}
+		
+		for (uint k = 0; k < fogFadeEnts.length(); k++)
+		{
+			CBaseEntity@ ent = fogFadeEnts[k];
+			println("GOT FADE ENT: " + ent.pev.classname);
+			
+			Vector pos = ent.pev.origin + Vector(0,100,0);
+			//te_model(pos, Vector(0,0,0), 0, ent.pev.model, 0, 8, MSG_ONE_UNRELIABLE, plr.edict());
+			//te_bubbletrail(pos, pos, ent.pev.model, 16, 1, -0.0f, MSG_ONE_UNRELIABLE, plr.edict());
+		}
+	}
+	
+	
+}
+
+void impactSnow(PlayerState@ state, Vector pos, int lifeTime, string spr)
+{
+	CBaseEntity@ plr = state.plr;
+	// if we're close to the limit, don't spawn impact sprites that aren't immediately next to us
+	if (state.particleCounter >= 500)
+	{
+		println("WEATHER SPRITE OVERFLOW! REDUCE YOUR WEATHER INTENSITY!");
+		return; // don't go over this limit!
+	}
+		
+	//te_sprite(pos, spr, 5, 200, MSG_ONE_UNRELIABLE, plr.edict());
 	te_model(pos, Vector(0,0,0), 0, spr, 0, lifeTime, MSG_ONE_UNRELIABLE, plr.edict());
-	incEffectCounter();
-	g_Scheduler.SetTimeout("decEffectCounter", lifeTime*0.1f);
+	incParticleCounter(state);
+	g_Scheduler.SetTimeout("decParticleCounter", lifeTime*0.1f, @state);
 }
 
-void incEffectCounter()
+void incParticleCounter(PlayerState@ state)
 {
-	effectCounter++;
+	state.particleCounter++;
 }
 
-void decEffectCounter()
+void decParticleCounter(PlayerState@ state)
 {
-	effectCounter--;
+	state.particleCounter--;
 }
 
-void snow(CBaseEntity@ plr, float fov, float radius, string spr, float speedMult)
+void snow(PlayerState@ state, float fov, float radius, string spr, float speedMult, Vector angles)
 {
+	CBaseEntity@ plr = state.plr;
+	if (state.particleCounter >= 500)
+	{
+		println("WEATHER SPRITE OVERFLOW! REDUCE YOUR WEATHER INTENSITY!");
+		return;
+	}
+		
 	float c = Math.RandomFloat(0, fov) + plr.pev.v_angle.y*(Math.PI/180.0f) - fov*0.5f; // random point on circle
-	float r = Math.RandomFloat(0.05, 1); // random radius
+	float r = Math.RandomFloat(0, 1); // random radius
 	float x = cos(c) * r * radius;
 	float y = sin(c) * r * radius;
-	float w = 0.2;
-	Vector vel = Vector(Math.RandomFloat(-w, w),Math.RandomFloat(-w, w),-1);
+	
+	Math.MakeVectors(angles);
+	Vector vel = g_Engine.v_forward;
+	vel = spreadDir(vel, 30);
 	Vector dir = vel.Normalize();
-	Vector offset = plr.pev.velocity*0.5f;
+	Vector angleOffset = g_Engine.v_forward*-600;
+	angleOffset.z = 0;
+	Vector offset = plr.pev.velocity*0.5f + angleOffset;
+	
+	float height = Math.RandomFloat(64, 600);		
+	Vector vecSrc = plr.pev.origin + Vector(x,y,height) + offset;
 	
 	// Don't spawn snow indoors
-	Vector vecSrc = plr.pev.origin + Vector(x,y,Math.RandomFloat(64,600)) + offset;
 	TraceResult tr;
+	Vector checkDir = g_Engine.v_forward*-4096;
+	g_Utility.TraceLine( vecSrc, vecSrc + checkDir, ignore_monsters, plr.edict(), tr );
+	CBaseEntity@ pHit = g_EntityFuncs.Instance( tr.pHit );
+	if (tr.flFraction >= 1.0f or (pHit !is null and pHit.pev.classname != "worldspawn"))
+		return;
+	
 	edict_t@ pEdict = g_EngineFuncs.PEntityOfEntIndex( 0 );
-	string tex = g_Utility.TraceTexture( pEdict, vecSrc, vecSrc + Vector(0,0,1)*4096 );
+	string tex = g_Utility.TraceTexture( pEdict, vecSrc, vecSrc + checkDir );
 	if (tex.ToLowercase() != "sky")
 		return;
 		
-	incEffectCounter();
-	
-	te_projectile(vecSrc, vel*200*speedMult, null, spr, 4, MSG_ONE_UNRELIABLE, plr.edict());
+	//te_beampoints(vecSrc, vecSrc + g_Engine.v_forward*-512);
+		
+	incParticleCounter(state);
 	
 	// spawn some stationary snow when the projectile snow hits a surface
 	g_Utility.TraceLine( vecSrc, vecSrc + dir*4096, ignore_monsters, plr.edict(), tr );
+	@pHit = g_EntityFuncs.Instance( tr.pHit );
 	float dist = tr.flFraction * 4096;
 	float speed = (vel*200*speedMult).Length();
 	float delay = speed > 0 ? dist / speed : 0;
 	Vector spawnOri = vecSrc + dir*dist;
+	int lifeTime = 8;
+	if (pHit !is null and pHit.pev.classname != "worldspawn" or abs(tr.vecPlaneNormal.z) < 0.5f)
+		lifeTime = 2;
 	if (speed > 0)
-		g_Scheduler.SetTimeout("impactSnow", delay, @plr, spawnOri, 8, spr);
-	g_Scheduler.SetTimeout("decEffectCounter", delay);
+		g_Scheduler.SetTimeout("impactSnow", delay, @state, spawnOri, lifeTime, spr);
+	g_Scheduler.SetTimeout("decParticleCounter", delay, @state);
+	
+	te_projectile(vecSrc, vel*200*speedMult, null, spr, int(delay+1), MSG_ONE_UNRELIABLE, plr.edict());
 	
 	//te_streaksplash(plr.pev.origin + Vector(x,y,600), vel, 232, spawns, 2048, 32, MSG_ONE_UNRELIABLE, plr.edict());
 }
@@ -181,6 +387,9 @@ void weatherThink(EHandle h_settings)
 		
 	CBaseEntity@ settings_ent = h_settings;
 	env_weather@ settings = cast<env_weather@>(CastToScriptClass(settings_ent));
+	
+	if (!settings.active)
+		return;
 		
 	populatePlayerStates();
 	array<string>@ stateKeys = player_states.getKeys();
@@ -188,9 +397,6 @@ void weatherThink(EHandle h_settings)
 	{
 		PlayerState@ state = cast<PlayerState@>( player_states[stateKeys[i]] );
 		CBaseEntity@ plr = state.plr;
-		
-		CBasePlayer@ plrEnt = cast<CBasePlayer@>(plr);
-		plrEnt.m_bloodColor = 242;
 		
 		int intensity = (int(g_Engine.time) % 19) - 2;
 		//intensity = 18;
@@ -203,11 +409,9 @@ void weatherThink(EHandle h_settings)
 		bool snowing = settings.weather_type == TYPE_SNOW;
 		if (snowing)
 		{					
-			net_fog(settings.fogColor, settings.fogStart, settings.fogEnd, true, MSG_ONE_UNRELIABLE, plr.edict());
-				
 			for (int k = 0; k < settings.intensity; k++)
 			{
-				snow(plr, Math.PI*2.0f, settings.radius, settings.effect_sprite, settings.speedMult);
+				snow(state, Math.PI*2.0f, settings.radius, settings.effect_sprite, settings.speedMult, settings.pev.angles);
 			}
 		}
 		else // rain
@@ -262,55 +466,45 @@ class env_weather : ScriptBaseEntity
 	int intensity;
 	float radius;
 	float speedMult = 1.0f;
-	Vector direction;
-	string copy_fog_radius;
 	
-	Color fogColor;
-	int fogStart;
-	int fogEnd;
-	
-	Color fogColor2;
-	int fogStart2;
-	int fogEnd2;
+	FogSettings fog;
 	
 	string effect_sprite;
 	string exposed_trigger_target;
 	string unexposed_trigger_target;
 	float trigger_freq;
 	
+	bool active = true;
+	
 	bool KeyValue( const string& in szKey, const string& in szValue )
 	{
-		if (szKey == "vuser1") fogColor = parseColor(szValue);
-		if (szKey == "vuser2") fogColor2 = parseColor(szValue);
-		if (szKey == "iuser1") fogStart2 = atoi(szValue);
-		if (szKey == "iuser2") fogEnd2 = atoi(szValue);
+		if (szKey == "fog_color") fog.color = parseColor(szValue);
+		else if (szKey == "weather_type") weather_type = atoi(szValue);
+		else if (szKey == "intensity") intensity = atoi(szValue);
+		else if (szKey == "radius") radius = atof(szValue);
+		else if (szKey == "particle_spr") effect_sprite = szValue;
+		else if (szKey == "exposed_trig") exposed_trigger_target = szValue;
+		else if (szKey == "unexposed_trig") unexposed_trigger_target = szValue;
+		else if (szKey == "trig_freq") trigger_freq = atof(szValue);
+		else if (szKey == "speed_mult") speedMult = atof(szValue);
+		else if (szKey == "fog_start") fog.start = atoi(szValue);
+		else if (szKey == "fog_end") fog.end = atoi(szValue);
+		else return BaseClass.KeyValue( szKey, szValue );
 		
-		return BaseClass.KeyValue( szKey, szValue );
+		return true;
 	}
 	
 	void Spawn()
-	{
-		weather_type = pev.body;
-		intensity = pev.skin;
-		radius = pev.renderamt;
-		direction = pev.rendercolor;
-		copy_fog_radius = pev.noise;
-		effect_sprite = pev.noise3;
-		
-		exposed_trigger_target = pev.noise1;
-		unexposed_trigger_target = pev.noise2;
-		trigger_freq = atof(pev.fuser1);
-		speedMult = atof(pev.scale);
-		
-		fogStart = pev.rendermode;
-		fogEnd = pev.renderfx;
-		
-		println("GOT C: " + fogColor.ToString());
-	
+	{			
 		Precache();
 		
 		EHandle h_self = self;
 		g_Scheduler.SetInterval("weatherThink", 0.05, -1, h_self);
+		
+		default_fog = fog;
+		no_default_fog = false;
+		
+		active = pev.spawnflags & FL_WEATHER_START_ON != 0;
 	}
 	
 	void Precache()
@@ -318,6 +512,101 @@ class env_weather : ScriptBaseEntity
 		//g_SoundSystem.PrecacheSound( sound );
 		if (effect_sprite.Length() > 0)
 			g_Game.PrecacheModel(effect_sprite);
+	}
+	
+	void Use(CBaseEntity@ pActivator, CBaseEntity@ pCaller, USE_TYPE useType, float flValue = 0.0f)
+	{
+		if (useType == USE_ON)
+			active = true;
+		if (useType == USE_OFF)
+			active = false;
+		else
+			active = !active;
+			
+		no_default_fog = !active;
+			
+		// clear fog for anyone outdoors
+		array<string>@ stateKeys = player_states.getKeys();
+		for (uint i = 0; i < stateKeys.length(); i++)
+		{
+			PlayerState@ state = cast<PlayerState@>( player_states[stateKeys[i]] );
+			CBaseEntity@ plr = state.plr;
+			
+			if (state.lastFogTouchId == 0)
+				state.setDefaultFogTarget();
+		}
+		
+	}
+};
+
+
+class func_fog : ScriptBaseEntity
+{		
+	FogSettings fog;
+	float transitionTime;
+	bool active;
+	
+	bool KeyValue( const string& in szKey, const string& in szValue )
+	{		
+		if (szKey == "fog_color") fog.color = parseColor(szValue);
+		else if (szKey == "fog_start") fog.start = atoi(szValue);
+		else if (szKey == "fog_end") fog.end = atoi(szValue);
+		else if (szKey == "renderamt") transitionTime = atof(szValue);
+		else return BaseClass.KeyValue( szKey, szValue );
+		
+		return true;
+	}
+	
+	void Spawn()
+	{				
+		self.pev.solid = SOLID_TRIGGER;
+		self.pev.movetype = MOVETYPE_NONE;
+		self.pev.effects = EF_NODRAW;
+		
+		g_EntityFuncs.SetModel(self, self.pev.model);
+		g_EntityFuncs.SetSize(self.pev, self.pev.mins, self.pev.maxs);
+		g_EntityFuncs.SetOrigin(self, self.pev.origin);
+		
+		active = pev.spawnflags & FL_WEATHER_START_ON != 0;
+	}
+	
+	void Touch( CBaseEntity@ pOther )
+	{
+		if (!active or !pOther.IsPlayer())
+			return;
+		CBasePlayer@ plr = cast<CBasePlayer@>(pOther);
+		PlayerState@ state = getPlayerState(plr);
+		
+		state.lastFogTouch = g_Engine.time;
+		
+		if (state.lastFogTouchId == self.entindex())
+			return;
+		
+		state.setNewFogTarget(fog);
+		state.lastFogTouchId = self.entindex();
+		state.fogInterpMode = EASE_OUT;
+	}
+	
+	void Use(CBaseEntity@ pActivator, CBaseEntity@ pCaller, USE_TYPE useType, float flValue = 0.0f)
+	{
+		if (useType == USE_ON)
+			active = true;
+		if (useType == USE_OFF)
+			active = false;
+		else
+			active = !active;
+			
+		// clear fog for anyone outdoors
+		array<string>@ stateKeys = player_states.getKeys();
+		for (uint i = 0; i < stateKeys.length(); i++)
+		{
+			PlayerState@ state = cast<PlayerState@>( player_states[stateKeys[i]] );
+			CBaseEntity@ plr = state.plr;
+			
+			if (state.lastFogTouchId == self.entindex())
+				state.setDefaultFogTarget();
+		}
+		
 	}
 };
 
@@ -335,6 +624,7 @@ void te_streaksplash(Vector start, Vector dir, uint8 color=250, uint16 count=256
 void te_breakmodel(Vector pos, Vector size, Vector velocity, uint8 speedNoise=16, string model="models/hgibs.mdl", uint8 count=8, uint8 life=0, uint8 flags=20, NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null) { NetworkMessage m(msgType, NetworkMessages::SVC_TEMPENTITY, dest);m.WriteByte(TE_BREAKMODEL);m.WriteCoord(pos.x);m.WriteCoord(pos.y);m.WriteCoord(pos.z);m.WriteCoord(size.x);m.WriteCoord(size.y);m.WriteCoord(size.z);m.WriteCoord(velocity.x);m.WriteCoord(velocity.y);m.WriteCoord(velocity.z);m.WriteByte(speedNoise);m.WriteShort(g_EngineFuncs.ModelIndex(model));m.WriteByte(count);m.WriteByte(life);m.WriteByte(flags);m.End(); }
 void te_projectile(Vector pos, Vector velocity, CBaseEntity@ owner=null, string model="models/grenade.mdl", uint8 life=1, NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null) {int ownerId = owner is null ? 0 : owner.entindex();NetworkMessage m(msgType, NetworkMessages::SVC_TEMPENTITY, dest);m.WriteByte(TE_PROJECTILE);m.WriteCoord(pos.x);m.WriteCoord(pos.y);m.WriteCoord(pos.z);m.WriteCoord(velocity.x);m.WriteCoord(velocity.y);m.WriteCoord(velocity.z);m.WriteShort(g_EngineFuncs.ModelIndex(model));m.WriteByte(life);m.WriteByte(ownerId);m.End();}
 void te_firefield(Vector pos, uint16 radius=128, string sprite="sprites/grenade.spr", uint8 count=128, uint8 flags=30, uint8 life=5, NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null) {NetworkMessage m(msgType, NetworkMessages::SVC_TEMPENTITY, dest);m.WriteByte(TE_FIREFIELD);m.WriteCoord(pos.x);m.WriteCoord(pos.y);m.WriteCoord(pos.z);m.WriteShort(radius);m.WriteShort(g_EngineFuncs.ModelIndex(sprite));m.WriteByte(count);m.WriteByte(flags);m.WriteByte(life);m.End();}
+void te_bubbletrail(Vector start, Vector end, string sprite="sprites/bubble.spr", float height=128.0f, uint8 count=16, float speed=16.0f, NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null) { NetworkMessage m(msgType, NetworkMessages::SVC_TEMPENTITY, dest);m.WriteByte(TE_BUBBLETRAIL);m.WriteCoord(start.x);m.WriteCoord(start.y);m.WriteCoord(start.z);m.WriteCoord(end.x);m.WriteCoord(end.y);m.WriteCoord(end.z);m.WriteCoord(height);m.WriteShort(g_EngineFuncs.ModelIndex(sprite));m.WriteByte(count);m.WriteCoord(speed);m.End(); }
 
 void net_fog(Color color, uint16 startDistance, uint16 endDistance, bool enabled=true, NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null)
 {
@@ -381,6 +671,63 @@ Color parseColor(string s) {
 	if (values.length() > 2) c.b = atoi( values[2] );
 	if (values.length() > 3) c.a = atoi( values[3] );
 	return c;
+}
+
+// Randomize the direction of a vector by some amount
+// Max degrees = 360, which makes a full sphere
+Vector spreadDir(Vector dir, float degrees)
+{
+	float spread = Math.DegreesToRadians(degrees) * 0.5f;
+	float x, y;
+	Vector vecAiming = dir;
+
+	float c = Math.RandomFloat(0, Math.PI*2); // random point on circle
+	float r = Math.RandomFloat(-1, 1); // random radius
+	x = cos(c) * r * spread;
+	y = sin(c) * r * spread;
+	
+	// get "up" vector relative to aim direction
+	Vector up = Vector(0, 0, 1);
+	if (abs(dir.z) > 0.9)
+		up = Vector(1, 0, 0);
+	Vector pitAxis = CrossProduct(dir, up).Normalize(); // get left vector of aim dir
+	Vector yawAxis = CrossProduct(dir, pitAxis).Normalize(); // get up vector relative to aim dir
+	
+	// Apply rotation around arbitrary "up" axis
+	array<float> yawRotMat = rotationMatrix(yawAxis, x);
+	vecAiming = matMultVector(yawRotMat, vecAiming).Normalize();
+	
+	// Apply rotation around "left/right" axis
+	array<float> pitRotMat = rotationMatrix(pitAxis, y);
+	vecAiming = matMultVector(pitRotMat, vecAiming).Normalize();
+			
+	return vecAiming;
+}
+
+array<float> rotationMatrix(Vector axis, float angle)
+{
+	axis = axis.Normalize();
+    float s = sin(angle);
+    float c = cos(angle);
+    float oc = 1.0 - c;
+ 
+	array<float> mat = {
+		oc * axis.x * axis.x + c,          oc * axis.x * axis.y - axis.z * s, oc * axis.z * axis.x + axis.y * s, 0.0,
+		oc * axis.x * axis.y + axis.z * s, oc * axis.y * axis.y + c,          oc * axis.y * axis.z - axis.x * s, 0.0,
+		oc * axis.z * axis.x - axis.y * s, oc * axis.y * axis.z + axis.x * s, oc * axis.z * axis.z + c,			 0.0,
+		0.0,                               0.0,                               0.0,								 1.0
+	};
+	return mat;
+}
+
+// multiply a matrix with a vector (assumes w component of vector is 1.0f) 
+Vector matMultVector(array<float> rotMat, Vector v)
+{
+	Vector outv;
+	outv.x = rotMat[0]*v.x + rotMat[4]*v.y + rotMat[8]*v.z  + rotMat[12];
+	outv.y = rotMat[1]*v.x + rotMat[5]*v.y + rotMat[9]*v.z  + rotMat[13];
+	outv.z = rotMat[2]*v.x + rotMat[6]*v.y + rotMat[10]*v.z + rotMat[14];
+	return outv;
 }
 
 class Color
