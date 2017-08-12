@@ -146,14 +146,14 @@ void initFog(string key)
 	println("WHY NO WORK");
 }
 
-void MapInit()
+void WeatherMapInit()
 {	
 	player_states.deleteAll();
 	g_CustomEntityFuncs.RegisterCustomEntity( "env_weather", "env_weather1" );
 	g_CustomEntityFuncs.RegisterCustomEntity( "func_fog", "func_fog" );
 }
 
-void MapActivate()
+void WeatherMapActivate()
 {
 	g_Scheduler.SetTimeout("populatePlayerStates", 2);
 	g_Scheduler.SetInterval("fogThink", 0.05);
@@ -299,6 +299,7 @@ void decParticleCounter(PlayerState@ state)
 
 void snow(PlayerState@ state, float fov, float radius, string spr, float speedMult, Vector angles)
 {
+	float maxSnowDist = 8192;
 	CBaseEntity@ plr = state.plr;
 	if (state.particleCounter >= 500)
 	{
@@ -324,7 +325,7 @@ void snow(PlayerState@ state, float fov, float radius, string spr, float speedMu
 	
 	// Don't spawn snow indoors
 	TraceResult tr;
-	Vector checkDir = g_Engine.v_forward*-4096;
+	Vector checkDir = g_Engine.v_forward*-maxSnowDist;
 	g_Utility.TraceLine( vecSrc, vecSrc + checkDir, ignore_monsters, plr.edict(), tr );
 	CBaseEntity@ pHit = g_EntityFuncs.Instance( tr.pHit );
 	if (tr.flFraction >= 1.0f or (pHit !is null and pHit.pev.classname != "worldspawn"))
@@ -340,9 +341,9 @@ void snow(PlayerState@ state, float fov, float radius, string spr, float speedMu
 	incParticleCounter(state);
 	
 	// spawn some stationary snow when the projectile snow hits a surface
-	g_Utility.TraceLine( vecSrc, vecSrc + dir*4096, ignore_monsters, plr.edict(), tr );
+	g_Utility.TraceLine( vecSrc, vecSrc + dir*maxSnowDist, ignore_monsters, plr.edict(), tr );
 	@pHit = g_EntityFuncs.Instance( tr.pHit );
-	float dist = tr.flFraction * 4096;
+	float dist = tr.flFraction * maxSnowDist;
 	float speed = (vel*200*speedMult).Length();
 	float delay = speed > 0 ? dist / speed : 0;
 	Vector spawnOri = vecSrc + dir*dist;
