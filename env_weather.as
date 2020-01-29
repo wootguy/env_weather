@@ -275,6 +275,7 @@ void impactSnow(PlayerState@ state, Vector pos, int lifeTime, string spr)
 {
 	CBaseEntity@ plr = state.plr;
 	// if we're close to the limit, don't spawn impact sprites that aren't immediately next to us
+	//println("PARTICLES: " + state.particleCounter);
 	if (state.particleCounter >= 500)
 	{
 		println("WEATHER SPRITE OVERFLOW! REDUCE YOUR WEATHER INTENSITY!");
@@ -299,7 +300,7 @@ void decParticleCounter(PlayerState@ state)
 
 void snow(PlayerState@ state, float fov, float radius, string spr, float speedMult, Vector angles)
 {
-	float maxSnowDist = 8192;
+	float maxSnowDist = 16384;
 	CBaseEntity@ plr = state.plr;
 	if (state.particleCounter >= 500)
 	{
@@ -320,7 +321,7 @@ void snow(PlayerState@ state, float fov, float radius, string spr, float speedMu
 	angleOffset.z = 0;
 	Vector offset = plr.pev.velocity*0.5f + angleOffset;
 	
-	float height = Math.RandomFloat(64, 600);		
+	float height = Math.RandomFloat(64, 1200);		
 	Vector vecSrc = plr.pev.origin + Vector(x,y,height) + offset;
 	
 	// Don't spawn snow indoors
@@ -346,11 +347,17 @@ void snow(PlayerState@ state, float fov, float radius, string spr, float speedMu
 	float dist = tr.flFraction * maxSnowDist;
 	float speed = (vel*200*speedMult).Length();
 	float delay = speed > 0 ? dist / speed : 0;
+	bool tooHigh = false;
+	if (delay > 1.6f) {
+		delay = 1.6f;
+		tooHigh = true;
+	}
+	
 	Vector spawnOri = vecSrc + dir*dist;
 	int lifeTime = 8;
 	if (pHit !is null and pHit.pev.classname != "worldspawn" or abs(tr.vecPlaneNormal.z) < 0.5f)
 		lifeTime = 2;
-	if (speed > 0)
+	if (speed > 0 && !tooHigh)
 		g_Scheduler.SetTimeout("impactSnow", delay, @state, spawnOri, lifeTime, spr);
 	g_Scheduler.SetTimeout("decParticleCounter", delay, @state);
 	
@@ -368,7 +375,7 @@ void rain(CBaseEntity@ plr, float fov, float radius, int spawns)
 	Vector vel = Vector(0,0,-1);
 	
 	int rand = spawns > 1 ? 255 : 0;
-	te_streaksplash(plr.pev.origin + Vector(x,y,600), vel, 232, spawns, 2048, rand, MSG_ONE_UNRELIABLE, plr.edict());
+	te_streaksplash(plr.pev.origin + Vector(x,y,600), vel, 7, spawns, 2048, rand, MSG_ONE_UNRELIABLE, plr.edict());
 }
 
 bool isPlayerExposed(CBaseEntity@ plr)
@@ -400,7 +407,7 @@ void weatherThink(EHandle h_settings)
 		CBaseEntity@ plr = state.plr;
 		
 		int intensity = (int(g_Engine.time) % 19) - 2;
-		//intensity = 18;
+		intensity = 1;
 		//println("INTENSITY: " + intensity + " - " + ((intensity - 12)*2));
 		//println("SPRITES: " + effectCounter);
 		
