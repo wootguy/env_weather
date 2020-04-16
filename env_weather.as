@@ -283,7 +283,7 @@ void impactSnow(PlayerState@ state, Vector pos, int lifeTime, string spr)
 	}
 		
 	//te_sprite(pos, spr, 5, 200, MSG_ONE_UNRELIABLE, plr.edict());
-	te_model(pos, Vector(0,0,0), 0, spr, 0, lifeTime, MSG_ONE_UNRELIABLE, plr.edict());
+	te_model(pos + Vector(0,0,1), Vector(0,0,0), 0, spr, 0, lifeTime, MSG_ONE_UNRELIABLE, plr.edict());
 	incParticleCounter(state);
 	g_Scheduler.SetTimeout("decParticleCounter", lifeTime*0.1f, @state);
 }
